@@ -60,6 +60,7 @@ from .block import (
     SCDown,
     TorchVision,
 )
+from .wssa import WSSA
 from .conv import (
     CBAM,
     ChannelAttention,
@@ -187,4 +188,5 @@ __all__ = (
     "YOLOESegment",
     "YOLOESegment26",
     "v10Detect",
+    "WSSA"
 )
