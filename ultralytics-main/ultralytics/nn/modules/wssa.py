@@ -46,7 +46,7 @@ class WSSA(nn.Module):
         self.se_lh = _SubBandSE(c1)
         self.se_hl = _SubBandSE(c1)
         self.se_hh = _SubBandSE(c1)
-        self.alpha = nn.Parameter(torch.tensor(0.1))
+        self.alpha = nn.Parameter(torch.zeros(1))
 
     @staticmethod
     def _dwt(x):
