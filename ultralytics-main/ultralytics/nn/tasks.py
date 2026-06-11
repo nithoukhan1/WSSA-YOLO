@@ -74,6 +74,7 @@ from ultralytics.nn.modules import (
     v10Detect,
     WSSA,
     FreqFusionUp,
+    EMA,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, SETTINGS, WINDOWS, YAML, colorstr, emojis
 from ultralytics.utils.checks import REMOTE_FILE_PREFIXES, check_file, check_requirements, check_suffix, check_yaml
@@ -1744,6 +1745,9 @@ def parse_model(d, ch, verbose=True):
         elif m is FreqFusionUp:
             c2 = sum(ch[x] for x in f)   # output = concat of both inputs
             args = [ch[f[0]], ch[f[1]]]   # [lr_channels, hr_channels]
+        elif m is EMA:
+            c2 = ch[f]
+            args = [ch[f]]
         else:
             c2 = ch[f]
 
