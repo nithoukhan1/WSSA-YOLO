@@ -1,0 +1,40 @@
+# EMA-YOLO11: YOLOv11s with EMA attention in the neck
+nc: 9
+scales:
+  s: [0.50, 0.50, 1024]
+
+# BACKBONE — COMPLETELY UNCHANGED (preserves pretrained COCO features)
+backbone:
+  - [-1, 1, Conv, [64, 3, 2]]           # 0
+  - [-1, 1, Conv, [128, 3, 2]]          # 1
+  - [-1, 2, C3k2, [256, False, 0.25]]   # 2
+  - [-1, 1, Conv, [256, 3, 2]]          # 3
+  - [-1, 2, C3k2, [512, False, 0.25]]   # 4
+  - [-1, 1, Conv, [512, 3, 2]]          # 5
+  - [-1, 2, C3k2, [512, True]]          # 6
+  - [-1, 1, Conv, [1024, 3, 2]]         # 7
+  - [-1, 2, C3k2, [1024, True]]         # 8
+  - [-1, 1, SPPF, [1024, 5]]            # 9
+  - [-1, 2, C2PSA, [1024]]              # 10
+
+# NECK — EMA attention added after C3k2 in upsample path
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 11
+  - [[-1, 6], 1, Concat, [1]]                    # 12
+  - [-1, 2, C3k2, [512, False]]                  # 13
+  - [-1, 1, EMA, [512]]                          # 14 ★ NEW
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 15
+  - [[-1, 4], 1, Concat, [1]]                    # 16
+  - [-1, 2, C3k2, [256, False]]                  # 17
+  - [-1, 1, EMA, [256]]                          # 18 ★ NEW
+
+  - [-1, 1, Conv, [256, 3, 2]]                   # 19
+  - [[-1, 14], 1, Concat, [1]]                   # 20 (cat with layer 14)
+  - [-1, 2, C3k2, [512, False]]                  # 21
+
+  - [-1, 1, Conv, [512, 3, 2]]                   # 22
+  - [[-1, 10], 1, Concat, [1]]                   # 23 (cat with layer 10)
+  - [-1, 2, C3k2, [1024, True]]                  # 24
+
+  - [[18, 21, 24], 1, Detect, [nc]]              # 25
