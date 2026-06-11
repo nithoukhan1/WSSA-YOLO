@@ -61,6 +61,7 @@ from .block import (
     TorchVision,
 )
 from .wssa import WSSA
+from .ema import EMA
 from .freqfusion import FreqFusionUp
 from .conv import (
     CBAM,
@@ -191,4 +192,5 @@ __all__ = (
     "v10Detect",
     "WSSA",
     "FreqFusionUp",
+    "EMA"
 )
