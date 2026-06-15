@@ -63,6 +63,7 @@ from .block import (
 from .wssa import WSSA
 from .ema import EMA
 from .freqfusion import FreqFusionUp
+from .gsconv import GSConv, VoVGSCSP, GSBottleneck
 from .conv import (
     CBAM,
     ChannelAttention,
@@ -193,4 +194,7 @@ __all__ = (
     "WSSA",
     "FreqFusionUp",
     "EMA"
+    'GSConv', 
+    'VoVGSCSP',
+    'GSBottleneck'
 )
