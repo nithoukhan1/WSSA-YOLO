@@ -28,9 +28,6 @@ class EMA(nn.Module):
         assert c1 % groups == 0, f"Channels {c1} must be divisible by groups {groups}"
         gc = c1 // groups
 
-        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
-        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
-
         self.softmax = nn.Softmax(dim=-1)
         self.gn = nn.GroupNorm(groups, c1)
 
