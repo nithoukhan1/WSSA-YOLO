@@ -77,6 +77,7 @@ from ultralytics.nn.modules import (
     EMA,
     GSConv,
     VoVGSCSP,
+    WHFE,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, SETTINGS, WINDOWS, YAML, colorstr, emojis
 from ultralytics.utils.checks import REMOTE_FILE_PREFIXES, check_file, check_requirements, check_suffix, check_yaml
@@ -1758,6 +1759,9 @@ def parse_model(d, ch, verbose=True):
             if m is VoVGSCSP:
                 args.insert(2, n)
                 n = 1
+        elif m is WHFE:
+            c1, c2 = ch[f], ch[f]   # WHFE preserves channels
+            args = [c1]
         else:
             c2 = ch[f]
 
