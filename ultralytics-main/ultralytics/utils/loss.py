@@ -345,7 +345,18 @@ class v8DetectionLoss:
         h = model.args  # hyperparameters
 
         m = model.model[-1]  # Detect() module
-        self.bce = nn.BCEWithLogitsLoss(reduction="none")
+        
+        
+        # Class-Balanced Loss (Cui et al., CVPR 2019) — env-var gated
+        from ultralytics.utils.cb_loss import get_cb_weights, cb_loss_enabled
+        if cb_loss_enabled():
+            cb_w = get_cb_weights(beta=0.999, num_classes=m.nc).to(device)
+            self.bce = nn.BCEWithLogitsLoss(reduction="none", pos_weight=cb_w)
+            print(f'[CB-Loss] ENABLED. Per-class pos_weights: {[f"{w:.3f}" for w in cb_w.tolist()]}')
+        else:
+            self.bce = nn.BCEWithLogitsLoss(reduction="none")
+            
+            
         self.hyp = h
         self.stride = m.stride  # model strides
         self.nc = m.nc  # number of classes
