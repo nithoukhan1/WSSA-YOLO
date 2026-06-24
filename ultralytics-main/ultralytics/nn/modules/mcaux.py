@@ -78,55 +78,38 @@ class MCAuxHead(nn.Module):
 def attach_mcaux_to_model(model: nn.Module, num_classes: int = 9):
     """Attach MCAux head and forward hook to the model.
 
-    Idempotent and resume-safe. The MCAuxHead is stored on the C2PSA LAYER
-    (not on the DetectionModel) so it doesn't appear in Ultralytics'
-    _predict_once iteration (which requires every child to have a .f attribute).
-
-    Args:
-        model: a YOLO DetectionModel wrapper (has .model.model Sequential)
-        num_classes: number of classes from the dataset
-    Returns:
-        tuple(head, hook_handle)
+    Idempotent and resume-safe. Attaches strictly to the parent DetectionModel
+    wrapper to avoid polluting the sequential layer stack and to prevent 
+    forward-pass argument corruption in the C2PSA block.
     """
-    # Traverse to the inner Sequential of layers
-    if hasattr(model, 'model') and isinstance(model.model, nn.Module):
-        inner = model.model
-    else:
-        inner = model
+    # 1. Isolate the parent DetectionModel
+    # (If wrapped in high-level YOLO class, unwrap it)
+    detection_model = model.model if type(model).__name__ == 'YOLO' else model
 
-    if hasattr(inner, 'model') and isinstance(inner.model, nn.Sequential):
-        layers = inner.model
-    elif isinstance(inner, nn.Sequential):
-        layers = inner
+    # 2. Locate the Sequential layer stack just to get the C2PSA layer
+    if hasattr(detection_model, 'model') and isinstance(detection_model.model, nn.Sequential):
+        layers = detection_model.model
     else:
-        raise RuntimeError(
-            f'Could not locate Sequential of layers. Got type {type(inner).__name__}'
-        )
+        raise RuntimeError(f"Could not locate Sequential stack in {type(detection_model).__name__}")
 
     c2psa_layer = layers[C2PSA_LAYER_IDX]
 
-    # ── KEY FIX: store head on c2psa_layer, NOT on the DetectionModel ──
-    # Storing on the DetectionModel via add_module causes _predict_once to
-    # iterate over MCAuxHead and crash looking for attribute .f.
-    # Storing on c2psa_layer keeps it as a submodule of that specific layer,
-    # so it's saved with the checkpoint but never seen by _predict_once.
-    if hasattr(c2psa_layer, '_mcaux_head') and isinstance(c2psa_layer._mcaux_head, MCAuxHead):
-        # Resume case: head already exists, reuse it
-        head = c2psa_layer._mcaux_head
+    # 3. KEY FIX: Attach head to the PARENT DetectionModel, not Sequential, not C2PSA.
+    if hasattr(detection_model, '_mcaux_head') and isinstance(detection_model._mcaux_head, MCAuxHead):
+        head = detection_model._mcaux_head
     else:
-        # Fresh training: create and attach to c2psa_layer
         head = MCAuxHead(in_channels=C2PSA_OUT_CHANNELS, num_classes=num_classes)
-        head = head.to(next(inner.parameters()).device)
-        c2psa_layer.add_module('_mcaux_head', head)
+        head = head.to(next(detection_model.parameters()).device)
+        detection_model.add_module('_mcaux_head', head)
 
-    # Hook stores logits on c2psa_layer (transient, not pickled)
+    # 4. Forward hook stores logits directly on the DetectionModel
     def hook(module, inputs, output):
         if mcaux_enabled() and module.training:
-            module._mcaux_last_logits = module._mcaux_head(output)
+            detection_model._mcaux_last_logits = detection_model._mcaux_head(output)
         else:
-            module._mcaux_last_logits = None
+            detection_model._mcaux_last_logits = None
 
-    # Remove old hook before re-registering (handles resume case)
+    # 5. Safe hook registration
     if hasattr(c2psa_layer, '_mcaux_hook_handle'):
         try:
             c2psa_layer._mcaux_hook_handle.remove()
@@ -136,19 +119,10 @@ def attach_mcaux_to_model(model: nn.Module, num_classes: int = 9):
     handle = c2psa_layer.register_forward_hook(hook)
     c2psa_layer._mcaux_hook_handle = handle
 
-    # Store c2psa_layer reference on inner model so loss() can find it
-    inner._mcaux_c2psa_layer = c2psa_layer
-
     return head, handle
 
 
 def get_last_mcaux_logits(model: nn.Module):
-    """Retrieve logits stored on the C2PSA layer by the forward hook."""
-    if hasattr(model, 'model') and isinstance(model.model, nn.Module):
-        inner = model.model
-    else:
-        inner = model
-    c2psa_layer = getattr(inner, '_mcaux_c2psa_layer', None)
-    if c2psa_layer is None:
-        return None
-    return getattr(c2psa_layer, '_mcaux_last_logits', None)
+    """Retrieve logits stored on the DetectionModel by the forward hook."""
+    detection_model = model.model if type(model).__name__ == 'YOLO' else model
+    return getattr(detection_model, '_mcaux_last_logits', None)
