@@ -377,14 +377,12 @@ class v8DetectionLoss:
         # ───────── MCAux: attach auxiliary classification head (env-var gated) ─────────
         if mcaux_enabled():
             attach_mcaux_to_model(model, num_classes=self.nc)
-            inner = model.model if hasattr(model, 'model') else model
-            from ultralytics.nn.modules.mcaux import C2PSA_LAYER_IDX
-            layers = inner.model if hasattr(inner, 'model') else inner
-            c2psa = layers[C2PSA_LAYER_IDX]
-            n_params = sum(p.numel() for p in c2psa._mcaux_head.parameters())
+            # The head is safely stored on the DetectionModel parent
+            detection_model = model.model if type(model).__name__ == 'YOLO' else model
+            n_params = sum(p.numel() for p in detection_model._mcaux_head.parameters())
             print(f'[MCAux] Attached. Aux head: {n_params:,} params, lambda={get_lambda()}')
+            
         self._model_ref = model
-
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
         """Preprocess targets by converting to tensor format and scaling coordinates."""
         nl, ne = targets.shape
