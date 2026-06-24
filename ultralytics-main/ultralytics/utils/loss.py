@@ -375,15 +375,14 @@ class v8DetectionLoss:
         
         
         # ───────── MCAux: attach auxiliary classification head (env-var gated) ─────────
-        # Idempotent — safe to call on both fresh training and resume.
-        # Always re-registers the forward hook (hooks aren't pickled).
         if mcaux_enabled():
             attach_mcaux_to_model(model, num_classes=self.nc)
             inner = model.model if hasattr(model, 'model') else model
-            n_params = sum(p.numel() for p in inner._mcaux_head.parameters())
+            from ultralytics.nn.modules.mcaux import C2PSA_LAYER_IDX
+            layers = inner.model if hasattr(inner, 'model') else inner
+            c2psa = layers[C2PSA_LAYER_IDX]
+            n_params = sum(p.numel() for p in c2psa._mcaux_head.parameters())
             print(f'[MCAux] Attached. Aux head: {n_params:,} params, lambda={get_lambda()}')
-        
-        # Store model reference so loss() can retrieve aux logits at training time.
         self._model_ref = model
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
