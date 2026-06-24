@@ -15,6 +15,7 @@ from ultralytics.utils.metrics import OKS_SIGMA, RLE_WEIGHT
 from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
 from ultralytics.utils.tal import RotatedTaskAlignedAssigner, TaskAlignedAssigner, dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import autocast
+from ultralytics.nn.modules.mcaux import attach_mcaux_to_model, mcaux_enabled, get_last_mcaux_logits, get_lambda
 
 from .metrics import bbox_iou, probiou
 from .tal import bbox2dist, rbox2dist
@@ -369,7 +370,13 @@ class v8DetectionLoss:
             topk2=tal_topk2,
         )
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
+        
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
+        # ───────── MCAux: attach auxiliary classification head (env-var gated) ─────────
+        if mcaux_enabled() and not hasattr(model, '_mcaux_head'):
+            attach_mcaux_to_model(model, num_classes=self.nc)
+            n_params = sum(p.numel() for p in model._mcaux_head.parameters())
+            print(f'[MCAux] Attached. Aux head: {n_params:,} params, lambda={get_lambda()}')
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
         """Preprocess targets by converting to tensor format and scaling coordinates."""
@@ -477,10 +484,28 @@ class v8DetectionLoss:
         return self.loss(self.parse_output(preds), batch)
 
     def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-        """Calculate detection loss using assigned targets."""
-        batch_size = preds["boxes"].shape[0]
-        loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
-        return loss * batch_size, loss_detach
+            """Calculate detection loss using assigned targets."""
+            batch_size = preds["boxes"].shape[0]
+            loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
+
+            # ───────── MCAux: add auxiliary multi-label image classification loss ─────────
+            if mcaux_enabled():
+                aux_logits = get_last_mcaux_logits()
+                if aux_logits is not None:
+                    nc = aux_logits.shape[1]
+                    img_labels = torch.zeros(batch_size, nc, device=aux_logits.device)
+                    if batch['cls'].numel() > 0:
+                        batch_idx = batch['batch_idx'].long()
+                        cls_idx = batch['cls'].view(-1).long()
+                        img_labels[batch_idx, cls_idx] = 1.0
+                    aux_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                        aux_logits, img_labels, reduction='mean'
+                    )
+                    total = loss.sum() * batch_size + get_lambda() * aux_loss * batch_size
+                    loss_with_aux = torch.cat([loss_detach, aux_loss.detach().unsqueeze(0)])
+                    return total, loss_with_aux
+
+            return loss * batch_size, loss_detach
 
 
 class v8SegmentationLoss(v8DetectionLoss):
