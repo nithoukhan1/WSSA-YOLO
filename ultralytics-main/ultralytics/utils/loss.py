@@ -372,11 +372,19 @@ class v8DetectionLoss:
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
         
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
+        
+        
         # ───────── MCAux: attach auxiliary classification head (env-var gated) ─────────
-        if mcaux_enabled() and not hasattr(model, '_mcaux_head'):
+        # Idempotent — safe to call on both fresh training and resume.
+        # Always re-registers the forward hook (hooks aren't pickled).
+        if mcaux_enabled():
             attach_mcaux_to_model(model, num_classes=self.nc)
-            n_params = sum(p.numel() for p in model._mcaux_head.parameters())
+            inner = model.model if hasattr(model, 'model') else model
+            n_params = sum(p.numel() for p in inner._mcaux_head.parameters())
             print(f'[MCAux] Attached. Aux head: {n_params:,} params, lambda={get_lambda()}')
+        
+        # Store model reference so loss() can retrieve aux logits at training time.
+        self._model_ref = model
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
         """Preprocess targets by converting to tensor format and scaling coordinates."""
@@ -484,28 +492,31 @@ class v8DetectionLoss:
         return self.loss(self.parse_output(preds), batch)
 
     def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-            """Calculate detection loss using assigned targets."""
-            batch_size = preds["boxes"].shape[0]
-            loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
+        """Calculate detection loss using assigned targets, plus optional MCAux loss."""
+        batch_size = preds["boxes"].shape[0]
+        loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
 
-            # ───────── MCAux: add auxiliary multi-label image classification loss ─────────
-            if mcaux_enabled():
-                aux_logits = get_last_mcaux_logits()
-                if aux_logits is not None:
-                    nc = aux_logits.shape[1]
-                    img_labels = torch.zeros(batch_size, nc, device=aux_logits.device)
-                    if batch['cls'].numel() > 0:
-                        batch_idx = batch['batch_idx'].long()
-                        cls_idx = batch['cls'].view(-1).long()
-                        img_labels[batch_idx, cls_idx] = 1.0
-                    aux_loss = torch.nn.functional.binary_cross_entropy_with_logits(
-                        aux_logits, img_labels, reduction='mean'
-                    )
-                    total = loss.sum() * batch_size + get_lambda() * aux_loss * batch_size
-                    loss_with_aux = torch.cat([loss_detach, aux_loss.detach().unsqueeze(0)])
-                    return total, loss_with_aux
+        # ───────── MCAux: add auxiliary multi-label image classification loss ─────────
+        if mcaux_enabled():
+            aux_logits = get_last_mcaux_logits(self._model_ref)
+            if aux_logits is not None:
+                nc = aux_logits.shape[1]
+                # Build image-level labels from box labels:
+                # for each image in batch, mark classes that have ≥1 box.
+                img_labels = torch.zeros(batch_size, nc, device=aux_logits.device)
+                if batch['cls'].numel() > 0:
+                    batch_idx = batch['batch_idx'].long()
+                    cls_idx = batch['cls'].view(-1).long()
+                    img_labels[batch_idx, cls_idx] = 1.0
+                aux_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                    aux_logits, img_labels, reduction='mean'
+                )
+                total = loss * batch_size + get_lambda() * aux_loss * batch_size
+                # Append aux loss to the returned tensor for logging
+                loss_with_aux = torch.cat([loss_detach, aux_loss.detach().unsqueeze(0)])
+                return total, loss_with_aux
 
-            return loss * batch_size, loss_detach
+        return loss * batch_size, loss_detach
 
 
 class v8SegmentationLoss(v8DetectionLoss):
