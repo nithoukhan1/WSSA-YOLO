@@ -65,7 +65,7 @@ from .ema import EMA
 from .freqfusion import FreqFusionUp
 from .gsconv import GSConv, VoVGSCSP, GSBottleneck
 from .whfe import WHFE
-from .mcaux import MCAuxHead, attach_mcaux_to_model, mcaux_enabled, get_last_mcaux_logits, get_lambda
+from .mcaux import MCAuxHead, attach_mcaux_to_model, mcaux_enabled, get_mcaux_head, get_lambda
 from .conv import (
     CBAM,
     ChannelAttention,
@@ -203,6 +203,6 @@ __all__ = (
     'MCAuxHead',
     'attach_mcaux_to_model',
     'mcaux_enabled',
-    'get_last_mcaux_logits',
+    'get_mcaux_head',
     'get_lambda',
 )
