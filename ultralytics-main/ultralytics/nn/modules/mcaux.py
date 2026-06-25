@@ -1,20 +1,15 @@
 """Multi-task Classification Auxiliary head (MCAux) for FWNet-YOLO.
 
-Attaches an image-level multi-label classification head to the model's backbone
-output (after the C2PSA block at layer 10). During training, predicts which
-classes are present anywhere in the image. The shared backbone gets dense
-supervision (one signal per image per class) that compensates for sparse
-rare-class box supervision.
-
-Design:
-    - The aux head is stored on the model as `model._mcaux_head` so it saves
-      and resumes via the standard YOLO checkpointing.
-    - A forward hook on the C2PSA layer (index 10) intercepts the feature map
-      during each training step and stores logits on `model._mcaux_last_logits`.
-    - The loss class reads `model._mcaux_last_logits` and folds the auxiliary
-      BCE loss into the total. λ=0.5 keeps it auxiliary, not dominant.
-    - At inference (`model.eval()`), the hook's `module.training` check is
-      False, so logits aren't stored and aux loss isn't computed.
+Design (clean, no hooks, no monkey-patching):
+    - MCAuxHead is created and attached as a submodule of the C2PSA layer
+      (layers[10]) BEFORE training starts (called from the training notebook
+      before model.train(), so the optimizer picks up the head's parameters).
+    - At loss time, the loss class retrieves the head via get_mcaux_head(model)
+      and feeds it the P5 feature from preds['feats'][-1].
+    - Image-level labels are derived for free from box labels.
+    - The auxiliary BCE loss is added to total loss with weight λ=0.5.
+    - At inference, the loss class is not called → no aux computation → zero
+      inference overhead.
 
 Env-var gated by USE_MCAUX. Default OFF.
 """
@@ -25,138 +20,111 @@ import torch.nn as nn
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Hyperparameters (fixed for this paper — don't change without re-ablating)
+# Hyperparameters
 # ─────────────────────────────────────────────────────────────────────────────
-LAMBDA = 0.5            # auxiliary loss weight in total loss
-HIDDEN_DIM = 256        # MLP hidden dimension
-DROPOUT_P = 0.2         # dropout in MLP
-C2PSA_OUT_CHANNELS = 512  # at YOLOv11s scale (width_mult=0.5 applied to 1024)
-C2PSA_LAYER_IDX = 10    # index of C2PSA layer in YOLOv11 architecture
+LAMBDA = 0.5                  # auxiliary loss weight
+HIDDEN_DIM = 256              # MLP hidden dim
+DROPOUT_P = 0.2
+P5_CHANNELS = 512             # YOLOv11s P5 feat channels (after width_mult)
+C2PSA_LAYER_IDX = 10          # where we attach as submodule for param visibility
 
 
 def mcaux_enabled() -> bool:
-    """Returns True if USE_MCAUX=1 in env vars."""
     return os.environ.get('USE_MCAUX', '0') == '1'
 
 
 def get_lambda() -> float:
-    """Auxiliary loss weight."""
     return LAMBDA
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# The auxiliary head module
+# The auxiliary head
 # ─────────────────────────────────────────────────────────────────────────────
 class MCAuxHead(nn.Module):
     """Image-level multi-label classification head.
-    
+
     Args:
-        in_channels: input feature channels (512 for YOLOv11s after width_mult)
-        num_classes: number of classes (9 for GRAZPEDWRI-DX)
+        in_channels: input feature channels (512 for YOLOv11s P5 feat)
+        num_classes: 9 for GRAZPEDWRI-DX
     """
-    def __init__(self, in_channels: int = C2PSA_OUT_CHANNELS, num_classes: int = 9):
+    def __init__(self, in_channels: int = P5_CHANNELS, num_classes: int = 9):
         super().__init__()
         self.gap = nn.AdaptiveAvgPool2d(1)
         self.fc1 = nn.Linear(in_channels, HIDDEN_DIM)
         self.act = nn.SiLU(inplace=True)
         self.dropout = nn.Dropout(p=DROPOUT_P)
         self.fc2 = nn.Linear(HIDDEN_DIM, num_classes)
-        # Init final layer near zero so aux loss starts small and doesn't dominate
         nn.init.zeros_(self.fc2.bias)
         nn.init.normal_(self.fc2.weight, std=0.01)
 
     def forward(self, feat: torch.Tensor) -> torch.Tensor:
-        x = self.gap(feat).flatten(1)         # [B, C]
-        x = self.act(self.fc1(x))             # [B, hidden]
+        x = self.gap(feat).flatten(1)
+        x = self.act(self.fc1(x))
         x = self.dropout(x)
-        return self.fc2(x)                    # [B, num_classes]
+        return self.fc2(x)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Attachment: idempotent function called by the loss class
+# Model traversal helpers
 # ─────────────────────────────────────────────────────────────────────────────
-def attach_mcaux_to_model(model: nn.Module, num_classes: int = 9):
-    """Attach MCAux head and patch the C2PSA layer's forward method.
+def _find_layers_sequential(model: nn.Module) -> nn.Sequential:
+    """Traverse from any model wrapper (YOLO, DetectionModel) to the
+    nn.Sequential of layers. Robust across Ultralytics versions.
+    """
+    cur = model
+    # Walk down via .model attribute until we hit a Sequential
+    for _ in range(5):  # depth limit, never goes more than ~3 in practice
+        if isinstance(cur, nn.Sequential):
+            return cur
+        if hasattr(cur, 'model') and isinstance(cur.model, nn.Module):
+            cur = cur.model
+            continue
+        break
+    raise RuntimeError(
+        f'Could not find Sequential of layers from model type {type(model).__name__}'
+    )
 
-    Idempotent and resume-safe. Uses direct forward-method patching instead of
-    PyTorch forward hooks (hooks caused dict-input issues in Ultralytics 8.4.50's
-    _predict_once iteration). The head is stored on the C2PSA layer itself so
-    Ultralytics' Sequential iteration never sees it.
+
+def attach_mcaux_to_model(model: nn.Module, num_classes: int = 9) -> MCAuxHead:
+    """Create and attach MCAuxHead as a submodule of the C2PSA layer.
+
+    Call this BEFORE model.train() in the training notebook so the head's
+    parameters are picked up when the optimizer is set up.
+
+    Idempotent: safe to call multiple times (resume case). Returns the
+    existing head if already attached, else creates and attaches.
 
     Args:
-        model: a YOLO DetectionModel wrapper (has .model.model Sequential)
-        num_classes: number of classes from the dataset
+        model: YOLO wrapper, DetectionModel, or Sequential — auto-detected
+        num_classes: nc from dataset
+
     Returns:
-        the MCAuxHead module (hook_handle is None — we use patching, not hooks)
+        the MCAuxHead instance
     """
-    # Traverse to the inner Sequential of layers
-    if hasattr(model, 'model') and isinstance(model.model, nn.Module):
-        inner = model.model
-    else:
-        inner = model
-
-    if hasattr(inner, 'model') and isinstance(inner.model, nn.Sequential):
-        layers = inner.model
-    elif isinstance(inner, nn.Sequential):
-        layers = inner
-    else:
-        raise RuntimeError(
-            f'Could not locate Sequential of layers. Got type {type(inner).__name__}'
-        )
-
+    layers = _find_layers_sequential(model)
     c2psa_layer = layers[C2PSA_LAYER_IDX]
 
-    # Create or reuse the MCAux head. Stored as a submodule of c2psa_layer
-    # so its parameters are picked up by model.parameters() (optimizer)
-    # and saved with checkpoints. _predict_once does NOT recurse into
-    # c2psa_layer's children, so the head won't be iterated over.
     if hasattr(c2psa_layer, '_mcaux_head') and isinstance(c2psa_layer._mcaux_head, MCAuxHead):
-        head = c2psa_layer._mcaux_head
-    else:
-        head = MCAuxHead(in_channels=C2PSA_OUT_CHANNELS, num_classes=num_classes)
-        head = head.to(next(inner.parameters()).device)
-        c2psa_layer.add_module('_mcaux_head', head)
+        return c2psa_layer._mcaux_head
 
-    # Monkey-patch forward: save the original method, replace with a wrapper
-    # that calls original then runs MCAux head on the output.
-    # Idempotent: if already patched, the cached _mcaux_original_forward exists
-    # and we reuse it instead of double-wrapping.
-    if not hasattr(c2psa_layer, '_mcaux_original_forward'):
-        c2psa_layer._mcaux_original_forward = c2psa_layer.forward
-
-    original_forward = c2psa_layer._mcaux_original_forward
-
-    def patched_forward(x):
-        result = original_forward(x)
-        # Only compute and store logits during training (not eval/inference)
-        if mcaux_enabled() and c2psa_layer.training:
-            c2psa_layer._mcaux_last_logits = c2psa_layer._mcaux_head(result)
-        else:
-            c2psa_layer._mcaux_last_logits = None
-        return result
-
-    # Install the patched forward on the instance (instance attribute overrides
-    # class-level forward for this specific c2psa_layer)
-    c2psa_layer.forward = patched_forward
-
-    # Store a reference on inner so the loss can locate the c2psa_layer
-    inner._mcaux_c2psa_layer = c2psa_layer
-
-    # Return head and a None placeholder (no hook handle since we don't use hooks)
-    return head, None
+    head = MCAuxHead(in_channels=P5_CHANNELS, num_classes=num_classes)
+    # Move to same device as the model
+    head = head.to(next(layers.parameters()).device)
+    # Add as submodule of c2psa_layer (NOT of the Sequential, NOT of the DetectionModel).
+    # This keeps the head out of _predict_once iteration but still in model.parameters().
+    c2psa_layer.add_module('_mcaux_head', head)
+    return head
 
 
-def get_last_mcaux_logits(model: nn.Module):
-    """Retrieve logits stored on the C2PSA layer by patched forward.
+def get_mcaux_head(model: nn.Module):
+    """Retrieve the attached MCAux head from any model wrapper.
 
-    Returns None if MCAux is disabled, if the model is in eval mode,
-    or if forward hasn't run yet.
+    Returns None if MCAux is not attached (i.e., USE_MCAUX=0 or attach
+    wasn't called).
     """
-    if hasattr(model, 'model') and isinstance(model.model, nn.Module):
-        inner = model.model
-    else:
-        inner = model
-    c2psa_layer = getattr(inner, '_mcaux_c2psa_layer', None)
-    if c2psa_layer is None:
+    try:
+        layers = _find_layers_sequential(model)
+        c2psa_layer = layers[C2PSA_LAYER_IDX]
+        return getattr(c2psa_layer, '_mcaux_head', None)
+    except Exception:
         return None
-    return getattr(c2psa_layer, '_mcaux_last_logits', None)
