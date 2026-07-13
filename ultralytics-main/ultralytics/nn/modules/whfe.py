@@ -21,12 +21,12 @@ import torch.nn.functional as F
 class HaarTransform(nn.Module):
     """2D Haar DWT and IDWT via grouped convolution.
     
-    Uses orthonormal Haar filters with 1/sqrt(2) normalization for
+    Uses orthonormal Haar filters with  normaliation for
     perfect reconstruction when gates are identity.
     """
     def __init__(self):
         super().__init__()
-        h = 1.0 / math.sqrt(2.0)
+        h = 0.5
         # Four 2x2 Haar filters: LL, LH (vertical), HL (horizontal), HH (diagonal)
         filters = torch.tensor([
             [[h,  h], [ h,  h]],   # LL — low-low
