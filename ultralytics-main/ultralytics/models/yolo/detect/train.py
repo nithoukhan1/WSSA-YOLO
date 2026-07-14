@@ -15,6 +15,7 @@ from ultralytics.data import build_dataloader, build_yolo_dataset
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.models import yolo
 from ultralytics.nn.tasks import DetectionModel
+from ultralytics.nn.modules.mcaux import attach_mcaux_to_model, mcaux_enabled
 from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
 from ultralytics.utils.patches import override_configs
 from ultralytics.utils.plotting import plot_images, plot_labels
@@ -178,9 +179,24 @@ class DetectionTrainer(BaseTrainer):
         Returns:
             (DetectionModel): YOLO detection model.
         """
-        model = DetectionModel(cfg, nc=self.data["nc"], ch=self.data["channels"], verbose=verbose and RANK == -1)
+        model = DetectionModel(
+            cfg,
+            nc=self.data["nc"],
+            ch=self.data["channels"],
+            verbose=verbose and RANK == -1,
+        )
+
+        # MCAux must exist before checkpoint weights are loaded.
+        # This allows its trained parameters to survive Kaggle resume.
+        if mcaux_enabled():
+            attach_mcaux_to_model(
+                model,
+                num_classes=self.data["nc"],
+            )
+
         if weights:
             model.load(weights)
+
         return model
 
     def get_validator(self):
