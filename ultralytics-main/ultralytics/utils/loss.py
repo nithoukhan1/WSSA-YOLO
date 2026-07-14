@@ -346,14 +346,43 @@ class v8DetectionLoss:
         h = model.args  # hyperparameters
 
         m = model.model[-1]  # Detect() module
-        # Class-Balanced Loss (Cui et al., CVPR 2019) — env-var gated
-        from ultralytics.utils.cb_loss import get_cb_weights, cb_loss_enabled
+
+        # Capped relative effective-number weighting for foreground
+        # Task-Aligned Assigner anchors.
+        #
+        # Important:
+        #   - BCE itself remains unchanged.
+        #   - Background-anchor weight remains 1.0.
+        #   - Foreground-anchor weights are applied after assignment.
+        from ultralytics.utils.cb_loss import (
+            cb_loss_enabled,
+            get_cb_foreground_weights,
+        )
+
+        self.bce = nn.BCEWithLogitsLoss(
+            reduction="none",
+        )
+
+        self.cb_foreground_weights = None
+
         if cb_loss_enabled():
-            cb_w = get_cb_weights(beta=0.999, num_classes=m.nc).to(device)
-            self.bce = nn.BCEWithLogitsLoss(reduction="none", pos_weight=cb_w)
-            print(f'[CB-Loss] ENABLED. Per-class pos_weights: {[f"{w:.3f}" for w in cb_w.tolist()]}')
-        else:
-            self.bce = nn.BCEWithLogitsLoss(reduction="none")
+            self.cb_foreground_weights = get_cb_foreground_weights(
+                beta=0.999,
+                num_classes=m.nc,
+                min_weight=1.0,
+                max_weight=2.0,
+            ).to(device)
+
+            formatted_weights = [
+                f"{weight:.3f}"
+                for weight in self.cb_foreground_weights.tolist()
+            ]
+
+            print(
+                "[CB-Loss] ENABLED. "
+                "Foreground anchor weights: "
+                f"{formatted_weights}"
+            )
         self.hyp = h
         self.stride = m.stride  # model strides
         self.nc = m.nc  # number of classes
@@ -457,11 +486,73 @@ class v8DetectionLoss:
 
         target_scores_sum = max(target_scores.sum(), 1)
 
-        # Cls loss with optional class weighting
-        bce_loss = self.bce(pred_scores, target_scores.to(dtype))  # (bs, num_anchors, nc)
+        # Classification BCE before optional foreground weighting.
+        target_scores_for_loss = target_scores.to(dtype)
+
+        bce_loss = self.bce(
+            pred_scores,
+            target_scores_for_loss,
+        )  # (batch, anchors, classes)
+
+
+        # Apply capped effective-number weighting only to foreground
+        # anchors selected by the Task-Aligned Assigner.
+        if self.cb_foreground_weights is not None:
+            class_weights = self.cb_foreground_weights.to(
+                device=target_scores_for_loss.device,
+                dtype=target_scores_for_loss.dtype,
+            ).view(1, 1, -1)
+
+            # Task-Aligned targets are soft scores rather than strict
+            # one-hot labels. Dividing by the target-score mass obtains
+            # the assigned class weight independently of target magnitude.
+            target_mass = target_scores_for_loss.sum(
+                dim=-1,
+            )
+
+            assigned_class_weights = (
+                target_scores_for_loss
+                * class_weights
+            ).sum(dim=-1) / target_mass.clamp_min(
+                1e-12,
+            )
+
+            # Background anchors and any degenerate zero-mass anchors
+            # must retain the ordinary BCE weight of 1.0.
+            positive_anchor_mask = (
+                fg_mask
+                & target_mass.gt(0)
+            )
+
+            anchor_weights = torch.where(
+                positive_anchor_mask,
+                assigned_class_weights,
+                torch.ones_like(
+                    assigned_class_weights,
+                ),
+            )
+
+            # Multiply the complete classification-loss vector of each
+            # foreground anchor, while leaving background unchanged.
+            bce_loss = (
+                bce_loss
+                * anchor_weights.unsqueeze(-1).to(
+                    bce_loss.dtype
+                )
+            )
+
+
+        # Preserve the existing cls_pw mechanism when separately used.
+        # For all FWNet CB experiments, keep cls_pw=0.0 to avoid combining
+        # two independent class-weighting methods.
         if self.class_weights is not None:
             bce_loss *= self.class_weights
-        loss[1] = bce_loss.sum() / target_scores_sum  # BCE
+
+
+        loss[1] = (
+            bce_loss.sum()
+            / target_scores_sum
+        )
 
         # Bbox loss
         if fg_mask.sum():
