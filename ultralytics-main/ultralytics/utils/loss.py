@@ -512,16 +512,39 @@ class v8DetectionLoss:
             aux_logits = self._mcaux_head_cached(p5_feat)       # [B, 9]
             nc = aux_logits.shape[1]
             img_labels = torch.zeros(batch_size, nc, device=aux_logits.device)
+
             if batch['cls'].numel() > 0:
                 batch_idx = batch['batch_idx'].long()
                 cls_idx = batch['cls'].view(-1).long()
                 img_labels[batch_idx, cls_idx] = 1.0
+
             aux_loss = torch.nn.functional.binary_cross_entropy_with_logits(
-                aux_logits, img_labels, reduction='mean'
+                aux_logits,
+                img_labels,
+                reduction='mean',
             )
-            total = loss * batch_size + get_lambda() * aux_loss * batch_size
-            loss_with_aux = torch.cat([loss_detach, aux_loss.detach().unsqueeze(0)])
-            return total, loss_with_aux
+
+            # Keep the auxiliary objective as a separate fourth loss component.
+            # The trainer will sum the four components once:
+            # box + cls + dfl + lambda_aux * aux.
+            weighted_aux_loss = get_lambda() * aux_loss
+
+            total_components = torch.cat(
+                [
+                    loss,
+                    weighted_aux_loss.unsqueeze(0),
+                ]
+            ) * batch_size
+
+            # Log the raw, unweighted auxiliary loss for interpretability.
+            loss_with_aux = torch.cat(
+                [
+                    loss_detach,
+                    aux_loss.detach().unsqueeze(0),
+                ]
+            )
+
+            return total_components, loss_with_aux
 
         return loss * batch_size, loss_detach
 
