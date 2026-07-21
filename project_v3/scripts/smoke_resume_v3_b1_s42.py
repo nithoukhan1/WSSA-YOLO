@@ -50,7 +50,8 @@ SMOKE_INTERRUPT_AFTER_EPOCH_INDEX = 0
 SMOKE_TRAIN_IMAGES = 160
 SMOKE_VALID_IMAGES = 64
 
-EXPECTED_PARAMETER_COUNT = 9_431_275
+EXPECTED_PRETRAINED_PARAMETER_COUNT = 9_458_752
+EXPECTED_NINE_CLASS_PARAMETER_COUNT = 9_431_275
 
 REQUIRED_DISABLED_FLAGS = {
     "USE_FOCALER": "0",
@@ -309,8 +310,10 @@ def set_and_verify_flags() -> dict[str, str]:
 
 def verify_model_architecture(
     model: Any,
+    expected_parameter_count: int,
+    stage_name: str,
 ) -> dict[str, Any]:
-    """Verify standard 9-class YOLO11s architecture."""
+    """Verify a standard YOLO11s architecture at a named stage."""
 
     module_names = [
         module.__class__.__name__
@@ -346,13 +349,15 @@ def verify_model_architecture(
         for parameter in model.model.parameters()
     )
 
-    if parameter_count != EXPECTED_PARAMETER_COUNT:
+    if parameter_count != expected_parameter_count:
         raise AssertionError(
-            f"Expected {EXPECTED_PARAMETER_COUNT:,} parameters, "
+            f"{stage_name}: expected "
+            f"{expected_parameter_count:,} parameters, "
             f"found {parameter_count:,}."
         )
 
     return {
+        "stage": stage_name,
         "parameter_count": parameter_count,
         "module_count": len(module_names),
         "forbidden_modules_present": (
@@ -1121,13 +1126,17 @@ def main() -> None:
 
     model = YOLO(str(weights_path))
 
-    architecture = verify_model_architecture(
-        model
+    pretrained_architecture = verify_model_architecture(
+        model,
+        expected_parameter_count=(
+            EXPECTED_PRETRAINED_PARAMETER_COUNT
+        ),
+        stage_name="official pretrained 80-class YOLO11s",
     )
 
     print(
         "Parameter count:",
-        architecture["parameter_count"],
+        pretrained_architecture["parameter_count"],
     )
 
     model.add_callback(
@@ -1364,13 +1373,21 @@ def main() -> None:
 
     resumed_architecture = (
         verify_model_architecture(
-            resumed_model
+            resumed_model,
+            expected_parameter_count=(
+                EXPECTED_NINE_CLASS_PARAMETER_COUNT
+            ),
+            stage_name="resumable 9-class YOLO11s checkpoint",
         )
     )
 
-    if resumed_architecture != architecture:
+    if (
+        resumed_architecture["forbidden_modules_present"]
+        != pretrained_architecture["forbidden_modules_present"]
+    ):
         raise AssertionError(
-            "Resumed architecture differs from phase 1."
+            "Custom-module status changed between initialization "
+            "and resume."
         )
 
     resume_observation: dict[str, Any] = {}
@@ -1620,7 +1637,14 @@ def main() -> None:
             else value
             for key, value in dataset_info.items()
         },
-        "architecture": architecture,
+        "architectures": {
+            "pretrained_initialization": (
+                pretrained_architecture
+            ),
+            "resumable_checkpoint": (
+                resumed_architecture
+            ),
+        },
         "phase_1": {
             "interrupted_after_epoch_index": (
                 SMOKE_INTERRUPT_AFTER_EPOCH_INDEX
