@@ -1,14 +1,18 @@
 # Wrist-PriViD V3
 # Experiment: V3-B1-S42
-# Strong single-view baseline using original training images only
+#
+# Controlled data-protocol experiment:
+# The only intended change from the verified V2 baseline is replacing
+# the 28,408-image offline-augmented training set with the 14,204
+# original-image training set.
 
 experiment:
   id: V3-B1-S42
   stage: strong_single_view_baseline
   description: >
-    YOLO11s baseline trained on the 14,204 original GRAZPEDWRI-DX
-    training images with online augmentation. Offline brightness copies
-    are excluded.
+    Controlled YOLO11s baseline trained using only the 14,204 original
+    GRAZPEDWRI-DX training images. All training hyperparameters are
+    preserved from the verified V2 baseline.
   branch: v3-strong-baseline
   seed: 42
   test_partition_allowed: false
@@ -17,8 +21,8 @@ data:
   dataset_name: GRAZPEDWRI-DX
   number_of_classes: 9
 
-  # These files will be generated inside the Kaggle notebook.
   dataset_root_environment_variable: GRAZPEDWRI_ROOT
+
   runtime_train_list: /kaggle/working/wrist_privid_v3/train_original.txt
   runtime_data_yaml: /kaggle/working/wrist_privid_v3/grazped_original_only.yaml
 
@@ -55,8 +59,10 @@ environment_flags:
   USE_MCAUX: "0"
 
 training:
-  image_size: 640
-  epochs: 250
+  image_size: 1024
+  epochs: 100
+  patience: 50
+
   batch_size: 16
   device: 0
   workers: 4
@@ -69,44 +75,38 @@ training:
   warmup_epochs: 3.0
   cosine_learning_rate: true
 
-  patience: 75
   amp: true
   deterministic: true
   seed: 42
-  close_mosaic_epochs: 15
 
 loss:
   box_gain: 7.5
-  classification_gain: 0.5
+  classification_gain: 2.5
   dfl_gain: 1.5
-  classification_positive_weight: 1.0
+  classification_positive_weight: 0.0
 
 augmentation:
-  # X-rays are grayscale, so hue and saturation changes are disabled.
-  hsv_h: 0.0
-  hsv_s: 0.0
-  hsv_v: 0.20
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
 
-  degrees: 5.0
-  translate: 0.05
-  scale: 0.20
+  degrees: 0.0
+  translate: 0.1
+  scale: 0.5
   shear: 0.0
   perspective: 0.0
 
-  # Flips are disabled because laterality markers and the text class
-  # would become anatomically or semantically inconsistent.
   flip_vertical: 0.0
-  flip_horizontal: 0.0
+  flip_horizontal: 0.5
 
-  mosaic: 0.5
+  mosaic: 1.0
   mixup: 0.0
-  copy_paste: 0.0
-  erasing: 0.0
+  close_mosaic_epochs: 15
 
 validation:
   enabled: true
   split: val
-  image_size: 640
+  image_size: 1024
   confidence_threshold: 0.001
   iou_threshold: 0.70
   maximum_detections: 300
@@ -123,14 +123,46 @@ output:
   save_results_csv: true
   exist_ok: false
 
+controlled_comparison:
+  reference_experiment: V3-B0-S42
+
+  only_intended_change:
+    from: offline_brightness_augmented
+    from_training_images: 28408
+    to: original_only_online_augmentation
+    to_training_images: 14204
+
+  preserved_from_v2:
+    image_size: 1024
+    epochs: 100
+    patience: 50
+    batch_size: 16
+    optimizer: SGD
+    initial_learning_rate: 0.01
+    final_learning_rate_fraction: 0.01
+    momentum: 0.937
+    weight_decay: 0.0005
+    warmup_epochs: 3.0
+    box_gain: 7.5
+    classification_gain: 2.5
+    dfl_gain: 1.5
+    classification_positive_weight: 0.0
+    mosaic: 1.0
+    close_mosaic_epochs: 15
+    seed: 42
+
 verification:
   required_branch: v3-strong-baseline
   required_experiment_id: V3-B1-S42
+
   expected_train_images: 14204
   expected_validation_images: 4094
+
   forbidden_training_prefix: "aug_"
+
   require_git_commit: true
   require_checkpoint_sha256: true
   require_saved_training_args: true
   require_results_csv: true
+
   official_test_split_must_remain_unused: true
