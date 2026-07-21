@@ -1,0 +1,122 @@
+# Wrist-PriViD V3
+# Strong single-view baseline development protocol
+
+project:
+  name: Wrist-PriViD
+  stage: strong_single_view_baseline
+  branch: v3-strong-baseline
+  test_partition_allowed: false
+
+dataset:
+  name: GRAZPEDWRI-DX
+  number_of_classes: 9
+
+  class_names:
+    - boneanomaly
+    - bonelesion
+    - foreignbody
+    - fracture
+    - metal
+    - periostealreaction
+    - pronatorsign
+    - softtissue
+    - text
+
+  official_original_train_images: 14204
+  official_validation_images: 4094
+
+  training_data_protocols:
+    B0:
+      description: Reproduce the previous V2 baseline
+      train_images: offline_brightness_augmented
+      train_image_count: 28408
+      image_size: 1024
+      epochs: 100
+
+    B1:
+      description: Original images with online augmentation
+      train_images: original_only
+      train_image_count: 14204
+      image_size: 640
+      epochs: 250
+
+    B2:
+      description: Replication of the winning B1 configuration
+      train_images: original_only
+      train_image_count: 14204
+      image_size: 640
+      epochs: 250
+
+model:
+  architecture: yolo11s
+  pretrained_weights: yolo11s.pt
+  custom_modules_enabled: false
+
+  required_environment_flags:
+    USE_FOCALER: "0"
+    USE_WHFE: "0"
+    USE_CBLOSS: "0"
+    USE_MCAUX: "0"
+
+training:
+  optimizer: SGD
+  learning_rate_initial: 0.01
+  learning_rate_final_fraction: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  cosine_learning_rate: true
+  amp: true
+
+  box_loss_gain: 7.5
+  classification_loss_gain: 0.5
+  dfl_loss_gain: 1.5
+  class_positive_weight: 1.0
+
+  mosaic: 1.0
+  close_mosaic_epochs: 15
+
+  patience: 75
+  workers: 4
+  deterministic: true
+
+screening:
+  development_split: validation
+  official_test_split_used: false
+
+  first_seed: 42
+  replication_seed: 3407
+  final_seed: 2026
+
+  primary_metric: mAP50-95
+  secondary_metrics:
+    - mAP50
+    - precision
+    - recall
+    - F1
+    - per_class_AP
+
+selection_rules:
+  minimum_promising_map50_95_gain: 0.005
+  replication_required: true
+  fracture_recall_must_not_materially_decline: true
+  rare_class_performance_must_be_reported: true
+
+frozen_v2_reference:
+  validation_best_epoch: 45
+  validation_map50_95_revalidated: 0.393328
+
+  official_test_results_for_historical_reference_only:
+    precision: 0.611138
+    recall: 0.643785
+    f1: 0.627037
+    map50: 0.629120
+    map50_95: 0.407887
+
+governance:
+  no_test_based_model_selection: true
+  every_run_requires_git_commit: true
+  every_checkpoint_requires_sha256: true
+  every_run_requires_saved_args: true
+  every_run_requires_results_csv: true
+  failed_runs_must_be_recorded: true
