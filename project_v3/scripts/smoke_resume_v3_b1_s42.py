@@ -7,7 +7,7 @@ before the expensive official 100-epoch experiment begins.
 Workflow:
 1. Build a small original-only train/validation subset.
 2. Start a 3-epoch YOLO11s run.
-3. Intentionally interrupt immediately after the first saved checkpoint.
+3. Intentionally interrupt after the second saved epoch, once the SGD momentum state has had time to initialize under AMP.
 4. Verify that last.pt is unstripped and contains optimizer state.
 5. Simulate a new Kaggle session by copying the partial run elsewhere.
 6. Restore the partial run into a clean writable directory.
@@ -45,7 +45,7 @@ EXPECTED_ULTRALYTICS_VERSION = "8.4.50"
 
 SMOKE_RUN_NAME = "wrist_privid_v3_b1_s42_resume_smoke"
 SMOKE_TOTAL_EPOCHS = 3
-SMOKE_INTERRUPT_AFTER_EPOCH_INDEX = 0
+SMOKE_INTERRUPT_AFTER_EPOCH_INDEX = 1
 
 SMOKE_TRAIN_IMAGES = 160
 SMOKE_VALID_IMAGES = 64
@@ -660,7 +660,8 @@ def verify_unstripped_partial_checkpoint(
 
     if epoch_index != SMOKE_INTERRUPT_AFTER_EPOCH_INDEX:
         raise AssertionError(
-            "Interrupted checkpoint epoch is not zero."
+            "Interrupted checkpoint epoch does not match the "
+            "planned second-epoch interruption."
         )
 
     if optimizer is None:
@@ -916,20 +917,36 @@ class IntentionalSmokeInterruption(RuntimeError):
     """Expected exception used to simulate Kaggle interruption."""
 
 
-def interrupt_after_first_saved_epoch(
+def interrupt_after_second_saved_epoch(
     trainer: Any,
 ) -> None:
     """
-    Raise only after epoch zero metrics and checkpoint have been saved.
+    Interrupt after epoch index 1, once optimizer state exists.
 
-    Ultralytics writes results.csv and last.pt before invoking the
-    on_model_save callback.
+    The first AMP epoch can legitimately contain no serialized
+    SGD momentum buffers when GradScaler skips every early step.
+    Waiting for the second saved epoch tests a genuinely resumable
+    optimizer state without changing the official training setup.
     """
 
     if (
         int(trainer.epoch)
         == SMOKE_INTERRUPT_AFTER_EPOCH_INDEX
     ):
+        optimizer_state_entries = len(trainer.optimizer.state)
+
+        print(
+            "In-memory optimizer state entries before interruption:",
+            optimizer_state_entries,
+        )
+
+        if optimizer_state_entries <= 0:
+            raise AssertionError(
+                "Optimizer state is still empty after two complete "
+                "epochs. Exact optimizer-state resume cannot yet be "
+                "validated."
+            )
+
         if not Path(trainer.last).is_file():
             raise AssertionError(
                 "last.pt was not written before interruption."
@@ -941,7 +958,7 @@ def interrupt_after_first_saved_epoch(
             )
 
         raise IntentionalSmokeInterruption(
-            "Expected smoke interruption after first saved epoch."
+            "Expected smoke interruption after the second saved epoch."
         )
 
 
@@ -1141,7 +1158,7 @@ def main() -> None:
 
     model.add_callback(
         "on_model_save",
-        interrupt_after_first_saved_epoch,
+        interrupt_after_second_saved_epoch,
     )
 
     interruption_observed = False
@@ -1253,9 +1270,9 @@ def main() -> None:
         for row in source_rows
     ]
 
-    if source_epoch_values != [1]:
+    if source_epoch_values != [1, 2]:
         raise AssertionError(
-            f"Expected source epoch history [1], "
+            f"Expected source epoch history [1, 2], "
             f"found {source_epoch_values}."
         )
 
@@ -1298,7 +1315,7 @@ def main() -> None:
             "optimizer_state_entries"
         ],
     )
-    print("✓ One epoch saved before interruption")
+    print("✓ Two epochs saved before interruption")
     print("✓ Partial last.pt is unstripped")
     print("✓ Optimizer and scaler states are present")
 
@@ -1454,10 +1471,10 @@ def main() -> None:
         resume_observation.get(
             "start_epoch_zero_based"
         )
-        != 1
+        != 2
     ):
         raise AssertionError(
-            "Resume did not start from epoch index 1."
+            "Resume did not start from epoch index 2."
         )
 
     if (
@@ -1481,7 +1498,7 @@ def main() -> None:
             "Previous results.csv was not present at resume start."
         )
 
-    print("✓ Resume started from epoch 2")
+    print("✓ Resume started from epoch 3")
     print("✓ Optimizer state restored before resumed training")
     print("✓ Previous results.csv present before resumed training")
 
@@ -1568,13 +1585,13 @@ def main() -> None:
         if line.strip()
     ]
 
-    if len(source_lines) != 2:
+    if len(source_lines) != 3:
         raise AssertionError(
             "Interrupted source results should contain "
-            "one header and one epoch row."
+            "one header and two epoch rows."
         )
 
-    if final_lines[:2] != source_lines:
+    if final_lines[:3] != source_lines:
         raise AssertionError(
             "The original results.csv header or first epoch row "
             "was modified during resume."
@@ -1711,7 +1728,7 @@ def main() -> None:
     print("✓ INTENTIONAL INTERRUPTION OCCURRED AFTER CHECKPOINT SAVE")
     print("✓ PARTIAL LAST.PT CONTAINED OPTIMIZER AND SCALER STATE")
     print("✓ PREVIOUS RESULTS.CSV AND BEST.PT WERE PRESERVED")
-    print("✓ RESUME STARTED FROM EPOCH 2, NOT EPOCH 1")
+    print("✓ RESUME STARTED FROM EPOCH 3, NOT EPOCH 1")
     print("✓ OPTIMIZER STATE WAS RESTORED")
     print("✓ EPOCH HISTORY IS CONTINUOUS: 1, 2, 3")
     print("✓ ORIGINAL FIRST-EPOCH RESULT WAS NOT MODIFIED")
