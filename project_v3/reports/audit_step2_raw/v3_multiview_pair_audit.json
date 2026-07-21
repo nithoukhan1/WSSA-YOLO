@@ -1,0 +1,66 @@
+{
+  "dataset_root": "/kaggle/input/datasets/nithoukhan/grazpedwri-dx-aug/GRAZPEDWRI-DX",
+  "study_key_definition": [
+    "patient_id",
+    "study_number",
+    "laterality"
+  ],
+  "timehash_excluded_from_study_key": true,
+  "reason_timehash_excluded": "Projection 1 and projection 2 are acquired at different timestamps within the same study.",
+  "train": {
+    "split": "train",
+    "metadata_rows": 14204,
+    "unique_patients": 4263,
+    "unique_study_keys": 7601,
+    "exact_paired_studies": 6475,
+    "paired_images": 12950,
+    "single_view_studies": 1000,
+    "ambiguous_studies": 126,
+    "paired_image_coverage": 0.9117150098563784,
+    "all_images_exist": true,
+    "all_labels_exist": true,
+    "timehash_difference_statistics": {
+      "minimum": 13.0,
+      "median": 43.0,
+      "mean": 50.67505791505791,
+      "p95": 101.0,
+      "maximum": 323.0
+    }
+  },
+  "valid": {
+    "split": "valid",
+    "metadata_rows": 4094,
+    "unique_patients": 1218,
+    "unique_study_keys": 2165,
+    "exact_paired_studies": 1884,
+    "paired_images": 3768,
+    "single_view_studies": 238,
+    "ambiguous_studies": 43,
+    "paired_image_coverage": 0.920371275036639,
+    "all_images_exist": true,
+    "all_labels_exist": true,
+    "timehash_difference_statistics": {
+      "minimum": 11.0,
+      "median": 44.0,
+      "mean": 51.68736730360934,
+      "p95": 104.0,
+      "maximum": 693.0
+    }
+  },
+  "outputs": {
+    "train_image_manifest": "/kaggle/working/v3_pair_audit/train_image_manifest.csv",
+    "valid_image_manifest": "/kaggle/working/v3_pair_audit/valid_image_manifest.csv",
+    "train_exact_pairs": "/kaggle/working/v3_pair_audit/train_exact_pairs.csv",
+    "valid_exact_pairs": "/kaggle/working/v3_pair_audit/valid_exact_pairs.csv",
+    "train_single_views": "/kaggle/working/v3_pair_audit/train_single_views.csv",
+    "valid_single_views": "/kaggle/working/v3_pair_audit/valid_single_views.csv",
+    "train_ambiguous": "/kaggle/working/v3_pair_audit/train_ambiguous_studies.csv",
+    "valid_ambiguous": "/kaggle/working/v3_pair_audit/valid_ambiguous_studies.csv",
+    "train_class_summary": "/kaggle/working/v3_pair_audit/train_paired_class_summary.csv",
+    "valid_class_summary": "/kaggle/working/v3_pair_audit/valid_paired_class_summary.csv"
+  },
+  "manual_review_outputs": {
+    "train": "/kaggle/working/v3_pair_audit/train_pairs_manual_review_sample.csv",
+    "valid": "/kaggle/working/v3_pair_audit/valid_pairs_manual_review_sample.csv"
+  }
+}
