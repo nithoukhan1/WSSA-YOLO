@@ -1,0 +1,58 @@
+{
+  "project": "Wrist-PriViD",
+  "test_partition_used": false,
+  "visual_review": {
+    "train": {
+      "split": "train",
+      "reviewed_pairs": 50,
+      "valid_pairs": 50,
+      "invalid_pairs": 0,
+      "uncertain_pairs": 0,
+      "pass_rate": 1.0
+    },
+    "valid": {
+      "split": "valid",
+      "reviewed_pairs": 50,
+      "valid_pairs": 50,
+      "invalid_pairs": 0,
+      "uncertain_pairs": 0,
+      "pass_rate": 1.0
+    },
+    "total_reviewed_pairs": 100,
+    "total_valid_pairs": 100
+  },
+  "train": {
+    "split": "train",
+    "paired_studies": 6475,
+    "target_context_samples": 12950,
+    "unique_pair_ids": 6475,
+    "unique_sample_ids": 12950,
+    "timehash_difference": {
+      "minimum": 13,
+      "median": 43.0,
+      "p95": 101.0,
+      "maximum": 323
+    }
+  },
+  "valid": {
+    "split": "valid",
+    "paired_studies": 1884,
+    "target_context_samples": 3768,
+    "unique_pair_ids": 1884,
+    "unique_sample_ids": 3768,
+    "timehash_difference": {
+      "minimum": 11,
+      "median": 44.0,
+      "p95": 104.0,
+      "maximum": 693
+    }
+  },
+  "manifest_files": {
+    "train_pair_studies": "manifests\\train_pair_studies.csv",
+    "valid_pair_studies": "manifests\\valid_pair_studies.csv",
+    "train_target_context": "manifests\\train_target_context_manifest.csv",
+    "valid_target_context": "manifests\\valid_target_context_manifest.csv",
+    "train_class_analysis": "manifests\\train_pair_class_analysis.csv",
+    "valid_class_analysis": "manifests\\valid_pair_class_analysis.csv"
+  }
+}

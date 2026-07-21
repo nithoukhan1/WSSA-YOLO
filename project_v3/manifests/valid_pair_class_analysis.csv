@@ -1,0 +1,10 @@
+﻿class_id,class_name,paired_studies_containing_class,paired_target_images_containing_class,paired_instances,studies_with_class_in_both_views,studies_with_class_only_in_projection_1,studies_with_class_only_in_projection_2,both_view_rate,single_view_only_rate
+0,boneanomaly,21,33,48,12,7,2,0.571429,0.428571
+1,bonelesion,5,8,8,3,2,0,0.6,0.4
+2,foreignbody,0,0,0,0,0,0,0.0,0.0
+3,fracture,1329,2537,3431,1208,30,91,0.908954,0.091046
+4,metal,65,130,147,65,0,0,1.0,0.0
+5,periostealreaction,269,425,652,156,68,45,0.579926,0.420074
+6,pronatorsign,99,99,99,0,0,99,0.0,1.0
+7,softtissue,74,81,86,7,6,61,0.094595,0.905405
+8,text,1883,3760,4365,1877,4,2,0.996814,0.003186

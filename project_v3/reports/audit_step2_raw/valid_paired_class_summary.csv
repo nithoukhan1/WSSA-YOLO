@@ -1,0 +1,10 @@
+class_id,class_name,paired_studies_containing_class,paired_image_occurrences,paired_instances
+0,boneanomaly,21,48,48
+1,bonelesion,5,8,8
+2,foreignbody,0,0,0
+3,fracture,1329,3431,3431
+4,metal,65,147,147
+5,periostealreaction,269,652,652
+6,pronatorsign,99,99,99
+7,softtissue,74,86,86
+8,text,1883,4365,4365
