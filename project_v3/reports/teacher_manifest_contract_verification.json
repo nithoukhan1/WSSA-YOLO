@@ -1,0 +1,30 @@
+{
+  "experiment": "Wrist-PriViD",
+  "contract": "Directed same-study target-context pairs",
+  "test_partition_used": false,
+  "train_validation_patient_overlap": 0,
+  "manifests": {
+    "train": {
+      "split": "train",
+      "path": "E:\\PhD\\Admitted\\Research\\Project 1\\WSSA-YOLO\\project_v3\\manifests\\train_target_context_manifest.csv",
+      "sha256": "4eff1d33b84abefdac94c3d653cc093fe65679923c212f809aaa47e9cd1b90ad",
+      "rows": 12950,
+      "pairs": 6475,
+      "study_keys": 6475,
+      "patients": 3982,
+      "background_target_rows": 10,
+      "background_context_rows": 10
+    },
+    "valid": {
+      "split": "valid",
+      "path": "E:\\PhD\\Admitted\\Research\\Project 1\\WSSA-YOLO\\project_v3\\manifests\\valid_target_context_manifest.csv",
+      "sha256": "d5a302fdd5b782dc57bfc1a275249cb66a75f9cf2b541809e7d47bda92e4c733",
+      "rows": 3768,
+      "pairs": 1884,
+      "study_keys": 1884,
+      "patients": 1146,
+      "background_target_rows": 1,
+      "background_context_rows": 1
+    }
+  }
+}
