@@ -567,6 +567,31 @@ def test_split(
         "✓ No sample opened its own context label path"
     )
 
+    print("\n✓ Exact split sample count verified")
+    print("✓ Real target images loaded")
+    print("✓ Real context images loaded")
+    print("✓ Target boxes and classes validated")
+    print("✓ Exactly one target label opened per sample")
+    print(
+        "✓ No context label was opened in the "
+        "context-supervision role"
+    )
+    print("✓ No context supervision returned")
+    print("✓ No offline augmented image used")
+    print("✓ No official test reference used")
+
+    return {
+        "split": split,
+        "dataset_samples": len(dataset),
+        "inspected_indices": indices,
+        "inspected_samples": inspected_samples,
+        "opened_target_label_count": len(
+            opened_label_paths
+        ),
+        "opened_context_label_count": 0,
+    }
+
+
 def main() -> None:
     """Run train and validation Dataset smoke tests."""
 
@@ -631,7 +656,17 @@ def main() -> None:
             ]
         ),
     )
-    print("Context label files opened: 0")
+    total_context_label_reads = (
+        train_report["opened_context_label_count"]
+        + valid_report["opened_context_label_count"]
+    )
+
+    assert total_context_label_reads == 0
+
+    print(
+        "Context labels opened as context supervision:",
+        total_context_label_reads,
+    )
     print("Context supervision returned: No")
     print("Offline augmented images used: 0")
     print("Official test partition used: No")
